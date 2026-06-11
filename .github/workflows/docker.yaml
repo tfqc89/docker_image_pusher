@@ -23,7 +23,6 @@ jobs:
         df -hT
         echo "=============================================================================="
 
-    # 增加可用磁盘空间
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
@@ -36,25 +35,16 @@ jobs:
     - name: Restart docker
       run: sudo service docker restart
 
-    - name: Free up disk space complete
-      run: |
-        echo "Free up disk space complete"
-        echo "=============================================================================="
-        df -hT
-        echo "=============================================================================="
-
     - name: Checkout Code
       uses: actions/checkout@v5
 
     - name: Docker Setup Buildx
       uses: docker/setup-buildx-action@v4
 
-    # 标准登录ACR（用--password-stdin，避免特殊字符问题）
     - name: Login to Aliyun ACR
       run: |
         echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ secrets.ALIYUN_REGISTRY }} -u ${{ secrets.ALIYUN_REGISTRY_USER }} --password-stdin
 
-    # 【关键修正】严格保留源镜像的版本号，无任何额外处理
     - name: Build and push image Aliyun
       run: |
         while IFS= read -r line || [ -n "$line" ]; do
@@ -64,44 +54,36 @@ jobs:
                 continue
             fi
         
-            echo "docker pull $line"
+            echo "=== Processing $line ==="
             docker pull $line
             
-            # 处理 --platform 参数（保留原逻辑）
+            # 处理 --platform 参数
             platform=$(echo "$line" | awk -F'--platform[ =]' '{if (NF>1) print $2}' | awk '{print $1}')
-            echo "platform is $platform"
             if [ -z "$platform" ]; then
                 platform_prefix=""
             else
                 platform_prefix="${platform//\//_}_"
             fi
-            echo "platform_prefix is $platform_prefix"
 
-            # 1. 提取完整镜像地址（含tag），去掉@sha256后缀
+            # 1. 提取完整镜像地址，去掉@sha256后缀
             image_full=$(echo "$line" | awk '{print $NF}')
             image_full="${image_full%%@*}"
             echo "image_full: $image_full"
-            
-            # 2. 提取镜像名:tag（只取/后面的部分，完整保留tag）
-            image_name_tag=$(echo "$image_full" | awk -F'/' '{print $NF}')
+
+            # 2. 提取镜像名:tag（终极方案：从右往左取，保留所有内容）
+            # 比如 registry.k8s.io/coredns/coredns:v1.10.1 → coredns:v1.10.1
+            image_name_tag=$(echo "$image_full" | sed -E 's/.*\///')
             echo "image_name_tag: $image_name_tag"
-            
+
             # 3. 直接拼接目标地址，不做任何额外处理
             new_image="$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$platform_prefix$image_name_tag"
             echo "new_image: $new_image"
 
-            echo "docker tag $image_full $new_image"
+            # 打标签并推送
             docker tag $image_full $new_image
-            
-            echo "docker push $new_image"
             docker push $new_image
 
             # 清理本地镜像
-            echo "清理本地镜像"
             docker rmi $image_full
             docker rmi $new_image
-            
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="
         done < images.txt
