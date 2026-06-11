@@ -23,7 +23,6 @@ jobs:
         df -hT
         echo "=============================================================================="
 
-    # 增加可用磁盘空间
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
@@ -36,51 +35,42 @@ jobs:
     - name: Restart docker
       run: sudo service docker restart
 
-    - name: Free up disk space complete
-      run: |
-        echo "Free up disk space complete"
-        echo "=============================================================================="
-        df -hT
-        echo "=============================================================================="
-
     - name: Checkout Code
       uses: actions/checkout@v5
 
     - name: Docker Setup Buildx
       uses: docker/setup-buildx-action@v4
 
-    # 官方标准登录ACR，解决 unauthorized & 明文密码告警
+    # 调试 Secrets
+    - name: Debug Secrets
+      run: |
+        echo "REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}"
+        echo "USERNAME: ${{ secrets.ALIYUN_REGISTRY_USER }}"
+        echo "PASSWORD length: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
+
+    # 标准登录（用--password-stdin，避免特殊字符问题）
     - name: Login to Aliyun ACR
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.ALIYUN_REGISTRY }}
-        username: ${{ env.ALIYUN_REGISTRY_USER }}
-        password: ${{ env.ALIYUN_REGISTRY_PASSWORD }}
+      run: |
+        echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ secrets.ALIYUN_REGISTRY }} -u ${{ secrets.ALIYUN_REGISTRY_USER }} --password-stdin
 
     - name: Build and push image Aliyun
       run: |
         declare -A duplicate_images
         declare -A temp_map
         while IFS= read -r line || [ -n "$line" ]; do
-            # 忽略空行与注释
             [[ -z "$line" ]] && continue
             if echo "$line" | grep -q '^\s*#'; then
                 continue
             fi
             
-            # 获取镜像的完整名称
             image=$(echo "$line" | awk '{print $NF}')
-            # 剔除sha256后缀
             image="${image%%@*}"
             echo "image $image"
-            # 截取 镜像名:标签
             image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
             echo "image_name_tag $image_name_tag"
-            # 截取源命名空间
             name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
             echo "name_space: $name_space"
             name_space="${name_space}_"
-            # 纯镜像名
             image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
             echo "image_name: $image_name"
             
@@ -95,7 +85,6 @@ jobs:
         done < images.txt
         
         while IFS= read -r line || [ -n "$line" ]; do
-            # 忽略空行与注释
             [[ -z "$line" ]] && continue
             if echo "$line" | grep -q '^\s*#'; then
                 continue
