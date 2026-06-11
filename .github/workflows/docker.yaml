@@ -23,6 +23,7 @@ jobs:
         df -hT
         echo "=============================================================================="
 
+    # 增加可用磁盘空间
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
@@ -35,56 +36,29 @@ jobs:
     - name: Restart docker
       run: sudo service docker restart
 
+    - name: Free up disk space complete
+      run: |
+        echo "Free up disk space complete"
+        echo "=============================================================================="
+        df -hT
+        echo "=============================================================================="
+
     - name: Checkout Code
       uses: actions/checkout@v5
 
     - name: Docker Setup Buildx
       uses: docker/setup-buildx-action@v4
 
-    # 调试 Secrets
-    - name: Debug Secrets
-      run: |
-        echo "REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}"
-        echo "USERNAME: ${{ secrets.ALIYUN_REGISTRY_USER }}"
-        echo "PASSWORD length: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
-
-    # 标准登录（用--password-stdin，避免特殊字符问题）
+    # 标准登录ACR（用--password-stdin，避免特殊字符问题）
     - name: Login to Aliyun ACR
       run: |
         echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ secrets.ALIYUN_REGISTRY }} -u ${{ secrets.ALIYUN_REGISTRY_USER }} --password-stdin
 
+    # 【关键修正】严格保留源镜像的版本号，无任何额外处理
     - name: Build and push image Aliyun
       run: |
-        declare -A duplicate_images
-        declare -A temp_map
         while IFS= read -r line || [ -n "$line" ]; do
-            [[ -z "$line" ]] && continue
-            if echo "$line" | grep -q '^\s*#'; then
-                continue
-            fi
-            
-            image=$(echo "$line" | awk '{print $NF}')
-            image="${image%%@*}"
-            echo "image $image"
-            image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-            echo "image_name_tag $image_name_tag"
-            name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-            echo "name_space: $name_space"
-            name_space="${name_space}_"
-            image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
-            echo "image_name: $image_name"
-            
-            if [[ -n "${temp_map[$image_name]}" ]]; then
-                 if [[ "${temp_map[$image_name]}" != $name_space ]]; then
-                    echo "duplicate image name: $image_name"
-                    duplicate_images[$image_name]="true"
-                 fi
-            else
-                temp_map[$image_name]=$name_space
-            fi       
-        done < images.txt
-        
-        while IFS= read -r line || [ -n "$line" ]; do
+            # 忽略空行与注释
             [[ -z "$line" ]] && continue
             if echo "$line" | grep -q '^\s*#'; then
                 continue
@@ -92,6 +66,8 @@ jobs:
         
             echo "docker pull $line"
             docker pull $line
+            
+            # 处理 --platform 参数（保留原逻辑）
             platform=$(echo "$line" | awk -F'--platform[ =]' '{if (NF>1) print $2}' | awk '{print $1}')
             echo "platform is $platform"
             if [ -z "$platform" ]; then
@@ -101,33 +77,31 @@ jobs:
             fi
             echo "platform_prefix is $platform_prefix"
 
-            image=$(echo "$line" | awk '{print $NF}')
-            image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-            name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-            image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
-        
-            name_space_prefix=""
-            if [[ -n "${duplicate_images[$image_name]}" ]]; then
-               if [[ -n "${name_space}" ]]; then
-                  name_space_prefix="${name_space}_"
-               fi
-            fi
+            # 1. 提取完整镜像地址（含tag），去掉@sha256后缀
+            image_full=$(echo "$line" | awk '{print $NF}')
+            image_full="${image_full%%@*}"
+            echo "image_full: $image_full"
             
-            image_name_tag="${image_name_tag%%@*}"
-            new_image="$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$platform_prefix$name_space_prefix$image_name_tag"
-            echo "docker tag $image $new_image"
-            docker tag $image $new_image
+            # 2. 提取镜像名:tag（只取/后面的部分，完整保留tag）
+            image_name_tag=$(echo "$image_full" | awk -F'/' '{print $NF}')
+            echo "image_name_tag: $image_name_tag"
+            
+            # 3. 直接拼接目标地址，不做任何额外处理
+            new_image="$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$platform_prefix$image_name_tag"
+            echo "new_image: $new_image"
+
+            echo "docker tag $image_full $new_image"
+            docker tag $image_full $new_image
+            
             echo "docker push $new_image"
             docker push $new_image
-            echo "开始清理磁盘空间"
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="
-            docker rmi $image
+
+            # 清理本地镜像
+            echo "清理本地镜像"
+            docker rmi $image_full
             docker rmi $new_image
-            echo "磁盘空间清理完毕"
+            
             echo "=============================================================================="
             df -hT
-            echo "=============================================================================="     
-            
+            echo "=============================================================================="
         done < images.txt
