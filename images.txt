@@ -1,5 +1,7 @@
-# 要同步的 DockerHub 镜像（不用写 docker.io/）
-nginx:latest
-alpine:3.18
-library/centos:7
-# 注释用 # 开头
+registry.k8s.io/kube-apiserver:v1.29.2
+registry.k8s.io/kube-controller-manager:v1.29.2
+registry.k8s.io/kube-scheduler:v1.29.2
+registry.k8s.io/kube-proxy:v1.29.2
+registry.k8s.io/etcd:3.5.9-0
+registry.k8s.io/coredns/coredns:v1.10.1
+registry.k8s.io/pause:3.9
