@@ -1,1 +1,5 @@
-Python:alpine3.19
+# 要同步的 DockerHub 镜像（不用写 docker.io/）
+nginx:latest
+alpine:3.18
+library/centos:7
+# 注释用 # 开头
